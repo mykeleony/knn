@@ -104,13 +104,13 @@ float knn(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tama
     return votar(vizinhos, k, yTrain);
 }
 
-void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTreino, float xTest[][CARACTERISTICAS], float yTest[], int tamanhoDoTeste, int k, bool flagDetalhado) {
+void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTreino, float xTest[][CARACTERISTICAS], float yTest[], int tamanhoDoTeste, int k, bool flagDetalhado, float predicoes[]) {
     int predicoesCorretas = 0;
     float precisao;
 
-    // Processar cada amostra de teste
     for (int i = 0; i < tamanhoDoTeste; i++) {
         float predito = knn(xTrain, yTrain, xTest[i], tamanhoDoTreino, k);
+        predicoes[i] = predito; // Armazenando a predição
 
         if (flagDetalhado) {
             printf("Amostra %d: Classe Real = %f, Classe Predita = %f\n", i + 1, yTest[i], predito);
@@ -121,27 +121,40 @@ void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTrein
         }
     }
 
-    // Calculando a precisao
     precisao = ((float)predicoesCorretas / tamanhoDoTeste) * 100.0;
     printf("\nPrecisao do Modelo KNN com k=%d: %.2f%%\n", k, precisao);
+}
+
+// Função para escrever as predições em um arquivo
+void escreverPredicoes(const char *nomeDoArquivo, float predicoes[], int tamanhoDoTeste) {
+    FILE *arquivo = fopen(nomeDoArquivo, "w");
+
+    if (arquivo == NULL) {
+        perror("Erro ao abrir o arquivo para escrita");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < tamanhoDoTeste; i++) {
+        fprintf(arquivo, "%.1f\n", predicoes[i]);
+    }
+
+    fclose(arquivo);
 }
 
 int main() {
     float xTrain[MAX_AMOSTRAS][CARACTERISTICAS], yTrain[MAX_AMOSTRAS];
     float xTest[MAX_AMOSTRAS][CARACTERISTICAS], yTest[MAX_AMOSTRAS];
-    int trainSize, testSize, k = 3; // Definindo k = 3 para o KNN
+    float predicoes[MAX_AMOSTRAS];
+    int trainSize, testSize; // Definindo k = 3 para o KNN
 
     // Lendo os dados de treinamento e teste
     lerDadosEixoX("xtrain.txt", xTrain, &trainSize);
     lerDadosEixoY("ytrain.txt", yTrain, trainSize);
     lerDadosEixoX("xtest.txt", xTest, &testSize);
-    lerDadosEixoY("ytest.txt", yTest, testSize);
 
-    // Chamando a função testKNN para diferentes valores de k
-    for (int k = 1; k <= 10; k++) { // Testando para k de 1 a 5, por exemplo
-        //printf("\nTestando KNN com k = %d\n", k);
-        testKNN(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false);
+    for (int k = 1; k <= 10; k++) {
+        testKNN(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false, predicoes);
     }
 
-    return 0;
+    escreverPredicoes("ytest.txt", predicoes, testSize);
 }
