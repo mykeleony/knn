@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <math.h>
+#include <omp.h>
 
-#define MAX_AMOSTRAS 1000    // Máximo de amostras
-#define CARACTERISTICAS 8          // Características por amostra
+#define MAX_AMOSTRAS 1000       // Máximo de amostras
+#define CARACTERISTICAS 8       // Características por amostra
 
 // Estrutura para armazenar a distância e o índice de um ponto de treinamento
 typedef struct {
@@ -85,6 +86,32 @@ void encontraKVizinhosMaisProximos(Vizinho vizinhos[], int k, float *pontoDeTest
     }
 }
 
+// Função para encontrar os k vizinhos mais próximos paralelizada
+void encontraKVizinhosMaisProximosParalelo(Vizinho vizinhos[], int k, float *pontoDeTeste, float xTrain[][CARACTERISTICAS], int tamanhoDoTreino) {
+    int i, j;
+
+#pragma omp parallel for private(j) shared(vizinhos, pontoDeTeste, xTrain)
+    for (i = 0; i < tamanhoDoTreino; i++) {
+        vizinhos[i].distancia = distanciaEuclidiana(pontoDeTeste, xTrain[i], CARACTERISTICAS);
+        vizinhos[i].indice = i;
+    }
+
+    // Ordenação paralelizada
+#pragma omp parallel for private(j)
+    for (i = 0; i < tamanhoDoTreino - 1; i++) {
+        for (j = 0; j < tamanhoDoTreino - i - 1; j++) {
+            if (vizinhos[j].distancia > vizinhos[j + 1].distancia) {
+#pragma omp critical
+                {
+                    Vizinho temp = vizinhos[j];
+                    vizinhos[j] = vizinhos[j + 1];
+                    vizinhos[j + 1] = temp;
+                }
+            }
+        }
+    }
+}
+
 // Função para realizar a votação das classes
 float votar(Vizinho vizinhos[], int k, float *yTrain) {
     float votos = 0;
@@ -100,6 +127,14 @@ float knn(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tama
     Vizinho vizinhos[tamanhoDoTreino];
 
     encontraKVizinhosMaisProximos(vizinhos, k, xTest, xTrain, tamanhoDoTreino);
+
+    return votar(vizinhos, k, yTrain);
+}
+
+float knnParalelo(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tamanhoDoTreino, int k) {
+    Vizinho vizinhos[tamanhoDoTreino];
+
+    encontraKVizinhosMaisProximosParalelo(vizinhos, k, xTest, xTrain, tamanhoDoTreino);
 
     return votar(vizinhos, k, yTrain);
 }
@@ -152,8 +187,18 @@ int main() {
     lerDadosEixoY("ytrain.txt", yTrain, trainSize);
     lerDadosEixoX("xtest.txt", xTest, &testSize);
 
+    double startTime, endTime;
+
     for (int k = 1; k <= 10; k++) {
-        testKNN(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false, predicoes);
+        startTime = omp_get_wtime();
+        testKNN(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false, predicoes, knnOriginal);
+        endTime = omp_get_wtime();
+        printf("Tempo KNN Original com k=%d: %f segundos\n", k, endTime - startTime);
+
+        startTime = omp_get_wtime();
+        testKNN(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false, predicoes, knnParalelo);
+        endTime = omp_get_wtime();
+        printf("Tempo KNN Paralelo com k=%d: %f segundos\n", k, endTime - startTime);
     }
 
     escreverPredicoes("ytest.txt", predicoes, testSize);
