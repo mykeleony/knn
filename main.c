@@ -4,7 +4,7 @@
 #include <math.h>
 #include <omp.h>
 
-#define MAX_AMOSTRAS 10000    // Máximo de amostras
+#define MAX_AMOSTRAS 1000000
 #define CARACTERISTICAS 8          // Características por amostra
 
 // Estrutura para armazenar a distância e o índice de um ponto de treinamento
@@ -67,6 +67,16 @@ float distanciaEuclidiana(float *a, float *b, int tamanho) {
     return sqrt(soma);
 }
 
+// Função de comparação para qsort
+int compararVizinhos(const void *a, const void *b) {
+    Vizinho *vizinhoA = (Vizinho *)a;
+    Vizinho *vizinhoB = (Vizinho *)b;
+
+    if (vizinhoA->distancia < vizinhoB->distancia) return -1;
+    if (vizinhoA->distancia > vizinhoB->distancia) return 1;
+    return 0;
+}
+
 // Função para encontrar os k vizinhos mais próximos
 void encontraKVizinhosMaisProximos(Vizinho vizinhos[], int k, float *pontoDeTeste, float xTrain[][CARACTERISTICAS], int tamanhoDoTreino) {
     for (int i = 0; i < tamanhoDoTreino; i++) {
@@ -74,50 +84,24 @@ void encontraKVizinhosMaisProximos(Vizinho vizinhos[], int k, float *pontoDeTest
         vizinhos[i].indice = i;
     }
 
-    // Ordenar os vizinhos por distância
-    for (int i = 0; i < tamanhoDoTreino - 1; i++) {
-        for (int j = 0; j < tamanhoDoTreino - i - 1; j++) {
-            if (vizinhos[j].distancia > vizinhos[j + 1].distancia) {
-                Vizinho temp = vizinhos[j];
-                vizinhos[j] = vizinhos[j + 1];
-                vizinhos[j + 1] = temp;
-            }
-        }
-    }
+    // Ordenar os vizinhos por distância usando qsort
+    qsort(vizinhos, tamanhoDoTreino, sizeof(Vizinho), compararVizinhos);
 }
 
-// Parallelized version of encontraKVizinhosMaisProximos using OpenMP
 void encontraKVizinhosMaisProximosParalelo(Vizinho vizinhos[], int k, float *pontoDeTeste, float xTrain[][CARACTERISTICAS], int tamanhoDoTreino) {
+    // Paralelizando o cálculo da distância
+#pragma omp parallel for
+    for (int i = 0; i < tamanhoDoTreino; i++) {
+        vizinhos[i].distancia = distanciaEuclidiana(pontoDeTeste, xTrain[i], CARACTERISTICAS);
+        vizinhos[i].indice = i;
+    }
+
+    // Usando qsort para ordenação paralela
 #pragma omp parallel
     {
-        int id = omp_get_thread_num();
-        int numThreads = omp_get_num_threads();
-        int start = id * tamanhoDoTreino / numThreads;
-        int end = (id + 1) * tamanhoDoTreino / numThreads;
-
-        for (int i = start; i < end; i++) {
-            vizinhos[i].distancia = distanciaEuclidiana(pontoDeTeste, xTrain[i], CARACTERISTICAS);
-            vizinhos[i].indice = i;
-        }
-
-        // Paraleliza a ordenação dentro de cada segmento
-#pragma omp single
+#pragma omp single nowait
         {
-            for (int i = 0; i < numThreads; i++) {
-                int start = i * tamanhoDoTreino / numThreads;
-                int end = (i + 1) * tamanhoDoTreino / numThreads - 1;
-
-                // Bubble sort no segmento
-                for (int a = start; a < end; a++) {
-                    for (int b = start; b < end - (a - start); b++) {
-                        if (vizinhos[b].distancia > vizinhos[b + 1].distancia) {
-                            Vizinho temp = vizinhos[b];
-                            vizinhos[b] = vizinhos[b + 1];
-                            vizinhos[b + 1] = temp;
-                        }
-                    }
-                }
-            }
+            qsort(vizinhos, tamanhoDoTreino, sizeof(Vizinho), compararVizinhos);
         }
     }
 }
@@ -130,29 +114,26 @@ float votar(Vizinho vizinhos[], int k, float *yTrain) {
         votos += yTrain[vizinhos[i].indice];
     }
 
-    return (votos > (k / 2)) ? 1.0 : 0.0; // Supondo que as classes são 0 e 1
+    return (votos > (k / 2)) ? 1.0 : 0.0; // Classes 0 e 1
 }
 
 float knn(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tamanhoDoTreino, int k) {
     Vizinho vizinhos[tamanhoDoTreino];
     encontraKVizinhosMaisProximos(vizinhos, k, xTest, xTrain, tamanhoDoTreino);
-    float resultado = votar(vizinhos, k, yTrain);
 
-    return resultado;
+    return votar(vizinhos, k, yTrain);
 }
 
 float knnParalelo(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tamanhoDoTreino, int k) {
     Vizinho vizinhos[tamanhoDoTreino];
     encontraKVizinhosMaisProximosParalelo(vizinhos, k, xTest, xTrain, tamanhoDoTreino);
-    float resultado = votar(vizinhos, k, yTrain);
 
-    return resultado;
+    return votar(vizinhos, k, yTrain);
 }
 
 void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTreino, float xTest[][CARACTERISTICAS], float yTest[], int tamanhoDoTeste, int k, bool flagDetalhado, float predicoes[]) {
     int predicoesCorretas = 0;
-    float precisao;
-    double start_time = omp_get_wtime(); // Início da marcação de tempo
+    double inicio = omp_get_wtime(); // Início da marcação de tempo
 
     for (int i = 0; i < tamanhoDoTeste; i++) {
         float predito = knn(xTrain, yTrain, xTest[i], tamanhoDoTreino, k);
@@ -167,20 +148,16 @@ void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTrein
         }
     }
 
-    double end_time = omp_get_wtime(); // Fim da marcação de tempo
-    printf("Tempo de execucao (KNN Normal): %f segundos\n", end_time - start_time);
-
-    precisao = ((float)predicoesCorretas / tamanhoDoTeste) * 100.0;
-//    printf("\nPrecisao do Modelo KNN com k=%d: %.2f%%\n", k, precisao);
+    double fim = omp_get_wtime(); // Fim da marcação de tempo
+    printf("Tempo de execucao (KNN Normal) para %d amostras: %f segundos\n", tamanhoDoTreino, (fim - inicio));
 }
 
 void testKNNParalelo(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTreino, float xTest[][CARACTERISTICAS], float yTest[], int tamanhoDoTeste, int k, bool flagDetalhado, float predicoes[]) {
     int predicoesCorretas = 0;
-    float precisao;
-    double start_time = omp_get_wtime(); // Início da marcação de tempo
+    double inicio = omp_get_wtime(); // Início da marcação de tempo
 
     for (int i = 0; i < tamanhoDoTeste; i++) {
-        float predito = knn(xTrain, yTrain, xTest[i], tamanhoDoTreino, k);
+        float predito = knnParalelo(xTrain, yTrain, xTest[i], tamanhoDoTreino, k);
         predicoes[i] = predito; // Armazenando a predição
 
         if (flagDetalhado) {
@@ -192,11 +169,8 @@ void testKNNParalelo(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanh
         }
     }
 
-    double end_time = omp_get_wtime(); // Fim da marcação de tempo
-    printf("Tempo de execucao (KNN Paralelo) para %d amostras: %f segundos\n", tamanhoDoTreino, (end_time - start_time));
-
-    precisao = ((float)predicoesCorretas / tamanhoDoTeste) * 100.0;
-//    printf("\nPrecisao do Modelo KNN com k=%d: %.2f%%\n", k, precisao);
+    double fim = omp_get_wtime();
+    printf("Tempo de execucao (KNN Paralelo) para %d amostras: %f segundos\n", tamanhoDoTreino, (fim - inicio));
 }
 
 // Função para escrever as predições em um arquivo
@@ -216,11 +190,25 @@ void escreverPredicoes(const char *nomeDoArquivo, float predicoes[], int tamanho
 }
 
 int main() {
-    float xTrain[MAX_AMOSTRAS][CARACTERISTICAS], yTrain[MAX_AMOSTRAS];
-    float xTest[MAX_AMOSTRAS][CARACTERISTICAS], yTest[MAX_AMOSTRAS];
-    float predicoes[MAX_AMOSTRAS];
+    float (*xTrain)[CARACTERISTICAS] = malloc(MAX_AMOSTRAS * sizeof(*xTrain));
+    float *yTrain = malloc(MAX_AMOSTRAS * sizeof(*yTrain));
+    float (*xTest)[CARACTERISTICAS] = malloc(MAX_AMOSTRAS * sizeof(*xTest));
+    float *yTest = malloc(MAX_AMOSTRAS * sizeof(*yTest));
+    float *predicoes = malloc(MAX_AMOSTRAS * sizeof(*predicoes));
+
+    if (!xTrain || !yTrain || !xTest || !yTest || !predicoes) {
+        fprintf(stderr, "Falha na alocação de memória.\n");
+
+        free(xTrain);
+        free(yTrain);
+        free(xTest);
+        free(yTest);
+        free(predicoes);
+        exit(EXIT_FAILURE);
+    }
+
     int trainSize, testSize;
-    int k = 3; // Definindo k = 3 para o KNN
+    int k = 3;
 
     const char *datasets[] = {"100", "500", "1000", "5000", "10000", "20000", "50000", "100000", "200000", "500000"};
     int numDatasets = sizeof(datasets) / sizeof(datasets[0]);
@@ -246,6 +234,12 @@ int main() {
         // Escrevendo as predições em um arquivo
         escreverPredicoes(yTestFile, predicoes, testSize);
     }
+
+    free(xTrain);
+    free(yTrain);
+    free(xTest);
+    free(yTest);
+    free(predicoes);
 
     return 0;
 }
