@@ -77,7 +77,7 @@ int compararVizinhos(const void *a, const void *b) {
     return 0;
 }
 
-// Função para encontrar os k vizinhos mais próximos
+// Encontra sequencialmente os k vizinhos mais próximos de um ponto de teste
 void encontraKVizinhosMaisProximos(Vizinho vizinhos[], int k, float *pontoDeTeste, float xTrain[][CARACTERISTICAS], int tamanhoDoTreino) {
     for (int i = 0; i < tamanhoDoTreino; i++) {
         vizinhos[i].distancia = distanciaEuclidiana(pontoDeTeste, xTrain[i], CARACTERISTICAS);
@@ -88,6 +88,7 @@ void encontraKVizinhosMaisProximos(Vizinho vizinhos[], int k, float *pontoDeTest
     qsort(vizinhos, tamanhoDoTreino, sizeof(Vizinho), compararVizinhos);
 }
 
+// Encontra paralelamente os k vizinhos mais próximos de um ponto de teste
 void encontraKVizinhosMaisProximosParalelo(Vizinho vizinhos[], int k, float *pontoDeTeste, float xTrain[][CARACTERISTICAS], int tamanhoDoTreino) {
     // Paralelizando o cálculo da distância
 #pragma omp parallel for
@@ -106,7 +107,7 @@ void encontraKVizinhosMaisProximosParalelo(Vizinho vizinhos[], int k, float *pon
     }
 }
 
-// Função para realizar a votação das classes
+// Vota para classificar o ponto de teste com base nos k vizinhos mais próximos
 float votar(Vizinho vizinhos[], int k, float *yTrain) {
     float votos = 0;
 
@@ -117,6 +118,7 @@ float votar(Vizinho vizinhos[], int k, float *yTrain) {
     return (votos > (k / 2)) ? 1.0 : 0.0; // Classes 0 e 1
 }
 
+// Orquestração das operações sequenciais do knn
 float knn(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tamanhoDoTreino, int k) {
     Vizinho vizinhos[tamanhoDoTreino];
     encontraKVizinhosMaisProximos(vizinhos, k, xTest, xTrain, tamanhoDoTreino);
@@ -124,6 +126,7 @@ float knn(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tama
     return votar(vizinhos, k, yTrain);
 }
 
+// Orquestração das operações paralelizadas do knn
 float knnParalelo(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, int tamanhoDoTreino, int k) {
     Vizinho vizinhos[tamanhoDoTreino];
     encontraKVizinhosMaisProximosParalelo(vizinhos, k, xTest, xTrain, tamanhoDoTreino);
@@ -131,6 +134,7 @@ float knnParalelo(float xTrain[][CARACTERISTICAS], float *yTrain, float *xTest, 
     return votar(vizinhos, k, yTrain);
 }
 
+// Testa a implementação sequencial do KNN e exibe resultados detalhados se necessário
 void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTreino, float xTest[][CARACTERISTICAS], float yTest[], int tamanhoDoTeste, int k, bool flagDetalhado, float predicoes[]) {
     int predicoesCorretas = 0;
     double inicio = omp_get_wtime(); // Início da marcação de tempo
@@ -149,9 +153,10 @@ void testKNN(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTrein
     }
 
     double fim = omp_get_wtime(); // Fim da marcação de tempo
-    printf("Tempo de execucao (KNN Normal) para %d amostras: %f segundos\n", tamanhoDoTreino, (fim - inicio));
+    printf("Tempo de execucao (KNN Normal) para %d amostras e k=%d: %f segundo(s)\n", tamanhoDoTreino, k, (fim - inicio));
 }
 
+// Testa a implementação sequencial do KNN e exibe resultados detalhados se necessário
 void testKNNParalelo(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanhoDoTreino, float xTest[][CARACTERISTICAS], float yTest[], int tamanhoDoTeste, int k, bool flagDetalhado, float predicoes[]) {
     int predicoesCorretas = 0;
     double inicio = omp_get_wtime(); // Início da marcação de tempo
@@ -170,10 +175,10 @@ void testKNNParalelo(float xTrain[][CARACTERISTICAS], float yTrain[], int tamanh
     }
 
     double fim = omp_get_wtime();
-    printf("Tempo de execucao (KNN Paralelo) para %d amostras: %f segundos\n", tamanhoDoTreino, (fim - inicio));
+    printf("Tempo de execucao (KNN Paralelo) para %d amostras e k=%d: %f segundo(s)\n", tamanhoDoTreino, k, (fim - inicio));
 }
 
-// Função para escrever as predições em um arquivo
+// Escreve as classes preditas em um arquivo
 void escreverPredicoes(const char *nomeDoArquivo, float predicoes[], int tamanhoDoTeste) {
     FILE *arquivo = fopen(nomeDoArquivo, "w");
 
@@ -207,8 +212,10 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    int trainSize, testSize;
-    int k = 3;
+    int trainSize, testSize, k;
+
+    printf("Por favor, insira o valor de k: ");
+    scanf("%d", &k);
 
     const char *datasets[] = {"100", "500", "1000", "5000", "10000", "20000", "50000", "100000", "200000", "500000"};
     int numDatasets = sizeof(datasets) / sizeof(datasets[0]);
@@ -227,11 +234,9 @@ int main() {
         lerDadosEixoY(yTrainFile, yTrain, trainSize);
         lerDadosEixoX(xTestFile, xTest, &testSize);
 
-        // Executando testes com KNN Normal e Paralelo
         testKNN(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false, predicoes);
         testKNNParalelo(xTrain, yTrain, trainSize, xTest, yTest, testSize, k, false, predicoes);
 
-        // Escrevendo as predições em um arquivo
         escreverPredicoes(yTestFile, predicoes, testSize);
     }
 
